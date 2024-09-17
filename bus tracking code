@@ -1,0 +1,329 @@
+#include <Arduino.h>
+#if defined(ESP32)
+  #include <WiFi.h>
+#elif defined(ESP8266)
+  #include <ESP8266WiFi.h>
+#endif
+#include <Firebase_ESP_Client.h>
+#define SS_PIN 4  //D2
+#define RST_PIN 5 //D1
+
+#include <TinyGPS++.h>
+#include <SoftwareSerial.h>
+#include <SPI.h>
+#include <MFRC522.h>
+
+//Provide the token generation process info.
+#include "addons/TokenHelper.h"
+//Provide the RTDB payload printing info and other helper functions.
+#include "addons/RTDBHelper.h"
+
+// Insert your network credentials
+#define WIFI_SSID "xxxx"
+#define WIFI_PASSWORD "xxxxxxx"
+
+// Insert Firebase project API Key
+#define API_KEY "xxxxxxxxxxxxxx"
+
+// Insert RTDB URLefine the RTDB URL */
+#define DATABASE_URL "xxxxxxxxxxxxxxxxxxxxxxx" 
+
+#define LED_G 15 //define green LED pin
+#define LED_Y 16 //define yellow LED
+
+//Define Firebase Data object
+FirebaseData fbdo;
+
+FirebaseAuth auth;
+FirebaseConfig config;
+
+unsigned long sendDataPrevMillis = 0;
+int count = 0;
+bool signupOK = false;
+TinyGPSPlus gps;
+SoftwareSerial gpsSerial(D3, D4); // RX, TX
+char buffer[100];
+
+MFRC522 mfrc522(SS_PIN, RST_PIN);
+int cnt = 0;
+int flag = 0;
+int flag1=0;
+int flag2=0;
+float bal1;
+float od1,od2,dist,fare;
+double lat;
+double lng;
+void printData() 
+{
+    if (gps.location.isUpdated()) {
+        lat = gps.location.lat();
+        lng = gps.location.lng();
+
+        double altitude = gps.altitude.meters();
+
+        /*int year = gps.date.year();
+        int month = gps.date.month();
+        int day = gps.date.day();
+
+        int hour = gps.time.hour();
+        int minute = gps.time.minute();
+        int second = gps.time.second();*/
+
+        snprintf(buffer, sizeof(buffer),
+                 "Latitude: %.8f, Longitude: %.8f",lat, lng);
+
+        Serial.println(buffer);
+    }
+    
+}
+void rfids()
+{
+   Firebase.RTDB.getInt(&fbdo,"BusDet/8qpT8V1i0L40F5aFeyqy/Bus_count");
+      cnt=fbdo.to<int>();
+    Firebase.RTDB.setInt(&fbdo,"BusDet/8qpT8V1i0L40F5aFeyqy/Bus_count",cnt);
+  printData();
+  delay(2000);
+  Firebase.RTDB.setString(&fbdo,"BusDet/8qpT8V1i0L40F5aFeyqy/Lat",lat);
+  Firebase.RTDB.setString(&fbdo,"BusDet/8qpT8V1i0L40F5aFeyqy/Long",lng);
+
+ 
+  if ( ! mfrc522.PICC_IsNewCardPresent()) 
+  {
+    return;
+  }
+  // Select one of the cards
+  if ( ! mfrc522.PICC_ReadCardSerial()) 
+  {
+    return;
+  }
+  //Show UID on serial monitor
+  Serial.println();
+  Serial.print(" UID tag :");
+  String content= "";
+  byte letter;
+  for (byte i = 0; i < mfrc522.uid.size; i++) 
+  {
+     Serial.print(mfrc522.uid.uidByte[i] < 0x10 ? " 0" : " ");
+     Serial.print(mfrc522.uid.uidByte[i], HEX);
+     content.concat(String(mfrc522.uid.uidByte[i] < 0x10 ? " 0" : " "));
+     content.concat(String(mfrc522.uid.uidByte[i], HEX));
+  }
+  content.toUpperCase();
+  Serial.println();
+
+  if (Firebase.ready() && signupOK && (millis() - sendDataPrevMillis > 3500 || sendDataPrevMillis == 0))
+  {
+    sendDataPrevMillis = millis();
+    // Write an Int number on the database path test/int
+    if (content.substring(1) == "01 94 E1 26"&&flag ==0&&cnt<2)
+    {
+      digitalWrite(LED_G, HIGH);
+      Firebase.RTDB.setString(&fbdo,"BusDet/8qpT8V1i0L40F5aFeyqy/kvFldVC3vIchgIVKlvoDUpA9byr2/UID","01 94 E1 26");
+      Firebase.RTDB.setString(&fbdo,"BusDet/8qpT8V1i0L40F5aFeyqy/kvFldVC3vIchgIVKlvoDUpA9byr2/status","Entered");
+      Serial.println("PASSED");
+      Serial.println("PATH: " + fbdo.dataPath());
+      Serial.println("TYPE: " + fbdo.dataType());
+      cnt++;
+      Firebase.RTDB.setInt(&fbdo,"BusDet/8qpT8V1i0L40F5aFeyqy/Bus_count",cnt);
+      printData();
+      Firebase.RTDB.setString(&fbdo,"BusDet/8qpT8V1i0L40F5aFeyqy/kvFldVC3vIchgIVKlvoDUpA9byr2/Lat1",lat);
+      Firebase.RTDB.setString(&fbdo,"BusDet/8qpT8V1i0L40F5aFeyqy/kvFldVC3vIchgIVKlvoDUpA9byr2/Long1",lng);
+      flag=1;
+      delay(1000);
+      digitalWrite(LED_G, LOW);
+    }
+    else if(content.substring(1) == "01 94 E1 26"&&flag ==1)
+    {
+      digitalWrite(LED_Y, HIGH);
+      Firebase.RTDB.setString(&fbdo,"BusDet/8qpT8V1i0L40F5aFeyqy/kvFldVC3vIchgIVKlvoDUpA9byr2/status","Exited");
+      Firebase.RTDB.setString(&fbdo,"BusDet/8qpT8V1i0L40F5aFeyqy/kvFldVC3vIchgIVKlvoDUpA9byr2/UID","null");
+      Serial.println("PASSED");
+      Serial.println("PATH: " + fbdo.dataPath());
+      Serial.println("TYPE: " + fbdo.dataType());
+      cnt--;
+      Firebase.RTDB.setInt(&fbdo,"BusDet/8qpT8V1i0L40F5aFeyqy/Bus_count",cnt);
+      Firebase.RTDB.getFloat(&fbdo,"BusDet/8qpT8V1i0L40F5aFeyqy/kvFldVC3vIchgIVKlvoDUpA9byr2/od1");
+      od1=fbdo.to<float>();
+      Firebase.RTDB.setFloat(&fbdo,"BusDet/8qpT8V1i0L40F5aFeyqy/kvFldVC3vIchgIVKlvoDUpA9byr2/od1",od1);
+      Firebase.RTDB.getFloat(&fbdo,"BusDet/8qpT8V1i0L40F5aFeyqy/kvFldVC3vIchgIVKlvoDUpA9byr2/od2");
+      od2=fbdo.to<float>();
+      Firebase.RTDB.setFloat(&fbdo,"BusDet/8qpT8V1i0L40F5aFeyqy/kvFldVC3vIchgIVKlvoDUpA9byr2/od2",od2);
+      dist=od2-od1;
+      fare=dist*2;
+      Firebase.RTDB.getFloat(&fbdo,"BusDet/8qpT8V1i0L40F5aFeyqy/kvFldVC3vIchgIVKlvoDUpA9byr2/Balance");
+      bal1=fbdo.to<float>();
+      bal1=bal1-fare;
+      Firebase.RTDB.setFloat(&fbdo,"BusDet/8qpT8V1i0L40F5aFeyqy/kvFldVC3vIchgIVKlvoDUpA9byr2/Balance",bal1);
+      flag=0;
+      printData();
+      Firebase.RTDB.setString(&fbdo,"BusDet/8qpT8V1i0L40F5aFeyqy/kvFldVC3vIchgIVKlvoDUpA9byr2/Lat2",lat);
+      Firebase.RTDB.setString(&fbdo,"BusDet/8qpT8V1i0L40F5aFeyqy/kvFldVC3vIchgIVKlvoDUpA9byr2/Long2",lng);
+      delay(1000);
+      digitalWrite(LED_Y, LOW);
+    }
+
+    else if (content.substring(1) == "30 15 B5 20"&&flag1 ==0&&cnt<2)
+    {
+      digitalWrite(LED_G, HIGH);
+      Firebase.RTDB.setString(&fbdo,"BusDet/8qpT8V1i0L40F5aFeyqy/jTeUlendU1dCsarp2FbMmuq1tkp1/UID","30 15 B5 20");
+      Firebase.RTDB.setString(&fbdo,"BusDet/8qpT8V1i0L40F5aFeyqy/jTeUlendU1dCsarp2FbMmuq1tkp1/status","Entered");
+      Serial.println("PASSED");
+      Serial.println("PATH: " + fbdo.dataPath());
+      Serial.println("TYPE: " + fbdo.dataType());
+      cnt++;
+      Firebase.RTDB.setInt(&fbdo,"BusDet/8qpT8V1i0L40F5aFeyqy/Bus_count",cnt);
+      flag1=1;
+       printData();
+      Firebase.RTDB.setString(&fbdo,"BusDet/8qpT8V1i0L40F5aFeyqy/jTeUlendU1dCsarp2FbMmuq1tkp1/Lat1",lat);
+      Firebase.RTDB.setString(&fbdo,"BusDet/8qpT8V1i0L40F5aFeyqy/jTeUlendU1dCsarp2FbMmuq1tkp1/Long1",lng);
+      delay(1000);
+      digitalWrite(LED_G, LOW);
+    }
+    else if(content.substring(1) == "30 15 B5 20"&&flag1 ==1)
+    {
+      digitalWrite(LED_Y, HIGH);
+      Firebase.RTDB.setString(&fbdo,"BusDet/8qpT8V1i0L40F5aFeyqy/jTeUlendU1dCsarp2FbMmuq1tkp1/status","Exited");
+      Firebase.RTDB.setString(&fbdo,"BusDet/8qpT8V1i0L40F5aFeyqy/jTeUlendU1dCsarp2FbMmuq1tkp1/UID","null");
+      Serial.println("PASSED");
+      Serial.println("PATH: " + fbdo.dataPath());
+      Serial.println("TYPE: " + fbdo.dataType());
+      cnt--;
+      Firebase.RTDB.setInt(&fbdo,"BusDet/8qpT8V1i0L40F5aFeyqy/Bus_count",cnt);
+      Firebase.RTDB.getFloat(&fbdo,"BusDet/8qpT8V1i0L40F5aFeyqy/jTeUlendU1dCsarp2FbMmuq1tkp1/od1");
+      od1=fbdo.to<float>();
+      Firebase.RTDB.setFloat(&fbdo,"BusDet/8qpT8V1i0L40F5aFeyqy/jTeUlendU1dCsarp2FbMmuq1tkp1/od1",od1);
+      Firebase.RTDB.getFloat(&fbdo,"BusDet/8qpT8V1i0L40F5aFeyqy/jTeUlendU1dCsarp2FbMmuq1tkp1/od2");
+      od2=fbdo.to<float>();
+      Firebase.RTDB.setFloat(&fbdo,"BusDet/8qpT8V1i0L40F5aFeyqy/jTeUlendU1dCsarp2FbMmuq1tkp1/od2",od2);
+      dist=od2-od1;
+      fare=dist*2;
+      Firebase.RTDB.getFloat(&fbdo,"BusDet/8qpT8V1i0L40F5aFeyqy/jTeUlendU1dCsarp2FbMmuq1tkp1/Balance");
+      bal1=fbdo.to<float>();
+      bal1=bal1-fare;
+      Firebase.RTDB.setFloat(&fbdo,"BusDet/8qpT8V1i0L40F5aFeyqy/jTeUlendU1dCsarp2FbMmuq1tkp1/Balance",bal1);
+      flag1=0;
+       printData();
+      Firebase.RTDB.setString(&fbdo,"BusDet/8qpT8V1i0L40F5aFeyqy/jTeUlendU1dCsarp2FbMmuq1tkp1/Lat2",lat);
+      Firebase.RTDB.setString(&fbdo,"BusDet/8qpT8V1i0L40F5aFeyqy/jTeUlendU1dCsarp2FbMmuq1tkp1/Long2",lng);
+      delay(1000);
+      digitalWrite(LED_Y, LOW);
+    }
+    else if (content.substring(1) == "60 27 5B 21"&&flag2 ==0&&cnt<2)
+    {
+      digitalWrite(LED_G, HIGH);
+      Firebase.RTDB.setString(&fbdo,"BusDet/8qpT8V1i0L40F5aFeyqy/RjlN3yBfQfb7ad9os7Zc9vCgEwX2/UID","60 27 5B 21");
+      Firebase.RTDB.setString(&fbdo,"BusDet/8qpT8V1i0L40F5aFeyqy/RjlN3yBfQfb7ad9os7Zc9vCgEwX2/status","Entered");
+      Serial.println("PASSED");
+      Serial.println("PATH: " + fbdo.dataPath());
+      Serial.println("TYPE: " + fbdo.dataType());
+      cnt++;
+      Firebase.RTDB.setInt(&fbdo,"BusDet/8qpT8V1i0L40F5aFeyqy/Bus_count",cnt);
+      flag2=1;
+       printData();
+      Firebase.RTDB.setString(&fbdo,"BusDet/8qpT8V1i0L40F5aFeyqy/RjlN3yBfQfb7ad9os7Zc9vCgEwX2/Lat1",lat);
+      Firebase.RTDB.setString(&fbdo,"BusDet/8qpT8V1i0L40F5aFeyqy/RjlN3yBfQfb7ad9os7Zc9vCgEwX2/Long1",lng);
+      delay(1000);
+      digitalWrite(LED_G, LOW);
+    }
+    else if(content.substring(1) == "60 27 5B 21"&&flag2 ==1)
+    {
+      digitalWrite(LED_Y, HIGH);
+      Firebase.RTDB.setString(&fbdo,"BusDet/8qpT8V1i0L40F5aFeyqy/RjlN3yBfQfb7ad9os7Zc9vCgEwX2/status","Exited");
+      Firebase.RTDB.setString(&fbdo,"BusDet/8qpT8V1i0L40F5aFeyqy/RjlN3yBfQfb7ad9os7Zc9vCgEwX2/UID","null");
+      Serial.println("PASSED");
+      Serial.println("PATH: " + fbdo.dataPath());
+      Serial.println("TYPE: " + fbdo.dataType());
+      cnt--;
+      Firebase.RTDB.setInt(&fbdo,"BusDet/8qpT8V1i0L40F5aFeyqy/Bus_count",cnt);
+      Firebase.RTDB.getFloat(&fbdo,"BusDet/8qpT8V1i0L40F5aFeyqy/RjlN3yBfQfb7ad9os7Zc9vCgEwX2/od1");
+      od1=fbdo.to<float>();
+      Firebase.RTDB.setFloat(&fbdo,"BusDet/8qpT8V1i0L40F5aFeyqy/RjlN3yBfQfb7ad9os7Zc9vCgEwX2/od1",od1);
+      Firebase.RTDB.getFloat(&fbdo,"BusDet/8qpT8V1i0L40F5aFeyqy/RjlN3yBfQfb7ad9os7Zc9vCgEwX2/od2");
+      od2=fbdo.to<float>();
+      Firebase.RTDB.setFloat(&fbdo,"BusDet/8qpT8V1i0L40F5aFeyqy/RjlN3yBfQfb7ad9os7Zc9vCgEwX2/od2",od2);
+      dist=od2-od1;
+      fare=dist*2;
+      Firebase.RTDB.getFloat(&fbdo,"BusDet/8qpT8V1i0L40F5aFeyqy/RjlN3yBfQfb7ad9os7Zc9vCgEwX2/Balance");
+      bal1=fbdo.to<float>();
+      bal1=bal1-fare;
+      Firebase.RTDB.setFloat(&fbdo,"BusDet/8qpT8V1i0L40F5aFeyqy/RjlN3yBfQfb7ad9os7Zc9vCgEwX2/Balance",bal1);
+      flag2=0;
+       printData();
+      Firebase.RTDB.setString(&fbdo,"BusDet/8qpT8V1i0L40F5aFeyqy/RjlN3yBfQfb7ad9os7Zc9vCgEwX2/Lat2",lat);
+      Firebase.RTDB.setString(&fbdo,"BusDet/8qpT8V1i0L40F5aFeyqy/RjlN3yBfQfb7ad9os7Zc9vCgEwX2/Long2",lng);
+      delay(1000);
+      digitalWrite(LED_Y, LOW);
+    }
+    else if (cnt>=2)
+    {
+      digitalWrite(LED_Y, HIGH);
+      digitalWrite(LED_G, HIGH);
+      delay(3000);
+      Serial.println("The bus is full");
+      digitalWrite(LED_Y, LOW);
+      digitalWrite(LED_G, LOW);
+    }
+    else 
+    {
+      Serial.println("Unknown card");
+      Serial.println("FAILED");
+      Serial.println("REASON: " + fbdo.errorReason());
+    }
+    count++;
+  }
+}
+void setup()
+{
+  Serial.begin(9600);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  Serial.print("Connecting to Wi-Fi");
+  while (WiFi.status() != WL_CONNECTED)
+  {
+    Serial.print(".");
+    SPI.begin();      // Initiate  SPI bus
+    gpsSerial.begin(9600);
+    mfrc522.PCD_Init();
+    delay(300);
+  }
+  Serial.println();
+  
+  Serial.print("Connected with IP: ");
+  Serial.println(WiFi.localIP());
+  Serial.println();
+
+  /* Assign the api key (required) */
+  config.api_key = API_KEY;
+
+  /* Assign the RTDB URL (required) */
+  config.database_url = DATABASE_URL;
+
+  /* Sign up */
+  if (Firebase.signUp(&config, &auth, "", "")){
+    Serial.println("ok");
+    signupOK = true;
+  }
+  else{
+    Serial.printf("%s\n", config.signer.signupError.message.c_str());
+  }
+
+  /* Assign the callback function for the long running token generation task */
+  config.token_status_callback = tokenStatusCallback; //see addons/TokenHelper.h
+  
+  Firebase.begin(&config, &auth);
+  Firebase.reconnectWiFi(true);
+  pinMode(LED_G, OUTPUT);
+  pinMode(LED_Y, OUTPUT);
+  Serial.println("Place your card near the reader");
+}
+
+void loop()
+{
+  
+   while (gpsSerial.available() > 0) 
+  {
+    if (gps.encode(gpsSerial.read())) 
+    {
+      rfids();
+    }
+  }   
+}
